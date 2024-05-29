@@ -1,5 +1,8 @@
 module Main where
 
+import Data.List
+import Data.Maybe
+
 newtype Stop = Stop {stopId :: String} deriving (Show)
 
 instance Eq Stop where
@@ -14,11 +17,17 @@ data StopTime = StopTime
   }
   deriving (Show)
 
+instance Eq StopTime where
+  (==) st1 st2 = stopTimeStop st1 == stopTimeStop st2
+
 data Trip = Trip
   { tripId :: !String,
     stopTimes :: ![StopTime]
   }
   deriving (Show)
+
+instance Eq Trip where
+  (==) t1 t2 = stopTimes t1 == stopTimes t2
 
 data Route = Route
   { routeId :: !String,
@@ -26,21 +35,51 @@ data Route = Route
   }
   deriving (Show)
 
+instance Eq Route where
+  (==) r1 r2 = routeId r1 == routeId r2
+
 stopsForTrip :: Trip -> [Stop]
 stopsForTrip trip = map stopTimeStop $ stopTimes trip
 
-splitTrips :: [Trip] -> [[Trip]] -> [[Trip]]
-splitTrips [] splits = splits
-splitTrips trips splits = foldl (flip sortIntoTrips) splits trips
+splitTrips :: [Trip] -> [[Trip]]
+splitTrips = foldr sortIntoTrips []
 
 sortIntoTrips :: Trip -> [[Trip]] -> [[Trip]]
-sortIntoTrips trip [] = [[t]]
+sortIntoTrips trip [] = [[trip]]
+sortIntoTrips trip ([] : tgs) = sortIntoTrips trip tgs
+sortIntoTrips trip (tg@(t : _) : tgs)
+  | trip == t = (t : tg) : tgs
+  | otherwise = tg : sortIntoTrips trip tgs
 
 uniqueRoutes :: Route -> [Route]
-uniqueRoutes route = []
+uniqueRoutes route = case splitTrips (trips route) of
+  [] -> []
+  [_] -> [route]
+  trips -> zipWith (curry f) [1 ..] trips
+  where
+    f :: (Integer, [Trip]) -> Route
+    f (i, tg) = Route (routeId route ++ "_" ++ show i) tg
 
 stopsForUniqueRoute :: Route -> [Stop]
-stopsForUniqueRoute route = stopsForTrip $ head $ trips route
+stopsForUniqueRoute (Route _ []) = []
+stopsForUniqueRoute (Route _ (t : _)) = stopsForTrip t
+
+uniqueRoutesForStop :: Stop -> [Route] -> [Route]
+uniqueRoutesForStop stop routes = [route | route <- routes, stop `elem` stopsForUniqueRoute route]
+
+isPrecedingStop :: Stop -> Stop -> [Stop] -> Bool
+isPrecedingStop stop referenceStop stops = fromJust (elemIndex stop stops) < fromJust (elemIndex referenceStop stops)
+
+type QueueItem = (Stop, Route)
+
+instance Eq QueueItem where
+  (==) (QueueItem _ r1) (QueueItem _ r2) = r1 == r2
+
+insertIntoQueue :: QueueItem -> [QueueItem] -> [QueueItem]
+insertIntoQueue item [] = [item]
+insertIntoQueue item queue | not (item `elem` queue) = item:queue
+                           | otherwise = insertIntoQueue item (delete item queue)
+                           -- TODO: check precedence
 
 data Transfer = Transfer
   { from :: !Stop,
@@ -53,16 +92,6 @@ type MarkedStops = [Stop]
 
 isFinished :: MarkedStops -> Bool
 isFinished = null
-
-stopTimesForStop :: Stop -> Trip -> [StopTime]
-stopTimesForStop stop trip = [stopTime | stopTime <- stopTimes trip, stopTimeStop stopTime == stop]
-
-tripsForStop :: Stop -> Route -> [Trip]
-tripsForStop stop route = [trip | trip <- trips route, not $ null $ stopTimesForStop stop trip]
-
-routesForStop :: Stop -> [Route] -> [Route]
-routesForStop stop routes =
-  [route | route <- routes, not $ null $ tripsForStop stop route]
 
 main :: IO ()
 main = do
@@ -121,10 +150,11 @@ main = do
             trips =
               [ Trip
                   "morgens"
-                  [ StopTime (stops !! 3) 1 2,
-                    StopTime (stops !! 4) 2 3,
-                    StopTime (stops !! 5) 3 4,
-                    StopTime (stops !! 6) 4 5
+                  [ StopTime (stops !! 0) 1 2,
+                    StopTime (stops !! 3) 2 3,
+                    StopTime (stops !! 4) 3 4,
+                    StopTime (stops !! 5) 4 5,
+                    StopTime (stops !! 6) 5 6
                   ],
                 Trip
                   "mittags"
@@ -142,7 +172,7 @@ main = do
                   ]
               ]
           }
-  let routes = [route_1, route_2]
-  let connections = routesForStop (stops !! 3) routes
+  let routes = concatMap uniqueRoutes [route_1, route_2]
+  let connections = uniqueRoutesForStop (stops !! 3) routes
   let connectionRouteIds = map routeId connections
   print connectionRouteIds
