@@ -70,16 +70,23 @@ uniqueRoutesForStop stop routes = [route | route <- routes, stop `elem` stopsFor
 isPrecedingStop :: Stop -> Stop -> [Stop] -> Bool
 isPrecedingStop stop referenceStop stops = fromJust (elemIndex stop stops) < fromJust (elemIndex referenceStop stops)
 
-type QueueItem = (Stop, Route)
+data QueueItem = QueueItem
+  { queueStop :: !Stop,
+    queueRoute :: !Route
+  }
 
 instance Eq QueueItem where
   (==) (QueueItem _ r1) (QueueItem _ r2) = r1 == r2
 
 insertIntoQueue :: QueueItem -> [QueueItem] -> [QueueItem]
 insertIntoQueue item [] = [item]
-insertIntoQueue item queue | not (item `elem` queue) = item:queue
-                           | otherwise = insertIntoQueue item (delete item queue)
-                           -- TODO: check precedence
+insertIntoQueue item@(QueueItem stop route) queue = case find (== item) queue of
+  Just (QueueItem qStop _) -> if isPrecedingStop stop qStop (stopsForUniqueRoute route) then item : delete item queue else queue
+  Nothing -> item : queue
+
+queueMarkedStops :: [Stop] -> [Route] -> [QueueItem] -> [QueueItem]
+queueMarkedStops [] _ queue = queue
+queueMarkedStops (x : xs) routes queue = queueMarkedStops xs routes (foldr (insertIntoQueue . QueueItem x) queue (uniqueRoutesForStop x routes))
 
 data Transfer = Transfer
   { from :: !Stop,
